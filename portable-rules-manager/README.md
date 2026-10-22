@@ -7,6 +7,7 @@
 - 只读扫描：根据项目目录、常见构建标记和框架依赖给出技术域候选。
 - 工具探测：`detect` 列出项目内各 AI 工具的规则入口痕迹、存放位置与加载机制。
 - 规则源：创建 `.ai-rules/manifest.json` + `core/` / `domains/` Markdown 模板。
+- 标准化建规则：`new-rule` 生成规则骨架并登记 manifest（自动校验 ID 唯一性、anchor 存在性、互斥组重叠，失败自动回滚）；`references/rule-authoring.md` 提供编写规范（ID 命名、layer/strength、必备章节、反模式、自检清单），覆盖编程行为规则与工程流程规范。
 - 场景隔离：普通 Web UI 与图表分析 UI 按目录单独匹配；HMI 独立。
 - 多平台适配：生成 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、Cursor `.mdc`、Copilot `.instructions.md`、Trae `.trae/rules/*.md`，并支持 Windsurf/Cascade 的原生 `AGENTS.md`。
 - 当前工具优先：推荐 `sync --tools <当前工具>` 只生成你正在使用的工具入口，不为闲置工具产生文件。
@@ -113,6 +114,22 @@ python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/
 python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo sync --tools claude,cursor --apply
 ```
 
+### 新增一条规则（规范体系落地）
+
+```bash
+# 1. 生成规则骨架并登记 manifest（anchor 必须是已存在的独立目录；校验失败自动回滚）
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo new-rule \
+  --id BACKEND-CUSTOM-API --file domains/backend/custom-api.md --anchor services/api \
+  --layer domain --strength must --description "自定义后端约定"
+
+# 2. 按 references/rule-authoring.md 填写骨架正文，删除提示语
+# 3. 预览并同步到当前工具，然后验收
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo sync --tools trae --apply
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo check --tools trae
+```
+
+`--disabled` 可登记为待审候选（`enabled:false`，不参与同步）。填写标准：每条 MUST 可被客观判定违反并写清因果，禁止「尽量/注意」类不可验收措辞。
+
 如遇目标文件已存在且为手工管理，**默认不覆盖**。建议将原文件内容迁入 `.ai-rules` 进行审查；仅经人工批准才能使用 `--force` 自动备份并覆盖。
 
 ## 示例：初始化后的目录
@@ -167,4 +184,4 @@ cd /path/to/portable-rules-manager
 python -m unittest discover -s tests -v
 ```
 
-更多 schema 字段与真实平台路径参考 `references/SCHEMA_AND_COMPATIBILITY.md`；各工具的存放位置、加载机制、探测线索、已知限制与 harvest 文件归属见 `references/tool-adapters.md`。
+更多 schema 字段与真实平台路径参考 `references/SCHEMA_AND_COMPATIBILITY.md`；各工具的存放位置、加载机制、探测线索、已知限制与 harvest 文件归属见 `references/tool-adapters.md`；规则编写质量标准（两类规则、必备章节、反模式、自检清单）见 `references/rule-authoring.md`。

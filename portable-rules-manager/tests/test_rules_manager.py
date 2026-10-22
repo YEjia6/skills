@@ -222,6 +222,66 @@ class CLI(unittest.TestCase):
         self.assertIn(".trae", entry["evidence"])
         self.assertIn("rule_locations", entry)
 
+    def test_new_rule_creates_skeleton_and_syncs(self):
+        self.runcli("init")
+        out = self.runcli("new-rule", "--id", "BACKEND-CUSTOM-API", "--file", "domains/backend/custom-api.md",
+                          "--anchor", "services/api", "--description", "自定义后端约定").stdout
+        self.assertIn("已创建规则骨架", out)
+        body = (self.root / ".ai-rules/domains/backend/custom-api.md").read_text(encoding="utf-8")
+        self.assertIn("MUST", body)
+        self.assertIn("验收", body)
+        m = json.loads((self.root / ".ai-rules/manifest.json").read_text(encoding="utf-8"))
+        entry = next(r for r in m["rules"] if r["id"] == "BACKEND-CUSTOM-API")
+        self.assertEqual(entry["anchor"], "services/api")
+        self.assertEqual(entry["globs"], ["services/api/**/*"])
+        self.assertEqual(entry["excludes"], [])
+        self.assertTrue(entry["enabled"])
+        self.assertEqual(entry["layer"], "domain")
+        self.runcli("sync", "--tools", "trae", "--apply")
+        self.assertTrue((self.root / ".trae/rules/ai-backend-custom-api.md").exists())
+        self.assertIn("BACKEND-CUSTOM-API", self.runcli("explain", "services/api/handler.py").stdout)
+
+    def test_new_rule_requires_init(self):
+        result = self.runcli("new-rule", "--id", "X-ONE", "--file", "domains/x.md", "--anchor", ".", success=False)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_new_rule_rejects_invalid_input(self):
+        self.runcli("init")
+        self.runcli("new-rule", "--id", "CUSTOM-ONE", "--file", "domains/x.md", "--anchor", "services/api")
+        for args in [
+            ("--id", "CUSTOM-ONE", "--file", "domains/y.md", "--anchor", "services/api"),  # duplicate id
+            ("--id", "CUSTOM-TWO", "--file", "domains/x.md", "--anchor", "services/api"),  # existing file
+            ("--id", "CUSTOM-THREE", "--file", "domains/z.md", "--anchor", "no/such/dir"),  # missing anchor
+            ("--id", "lower-case", "--file", "domains/w.md", "--anchor", "services/api"),  # bad id format
+            ("--id", "CUSTOM-FOUR", "--file", "domains/v.txt", "--anchor", "services/api"),  # not .md
+        ]:
+            result = self.runcli("new-rule", *args, success=False)
+            self.assertNotEqual(result.returncode, 0, args)
+        m = json.loads((self.root / ".ai-rules/manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual([r["id"] for r in m["rules"]].count("CUSTOM-ONE"), 1)
+        self.assertFalse(any(r["id"] in ("CUSTOM-TWO", "CUSTOM-THREE", "CUSTOM-FOUR") for r in m["rules"]))
+
+    def test_new_rule_conflict_group_overlap_rolls_back(self):
+        self.runcli("init")
+        result = self.runcli("new-rule", "--id", "WEB-VISUAL-CLASH", "--file", "domains/web/clash.md",
+                             "--anchor", "apps/web", "--layer", "scenario",
+                             "--conflict-group", "web-visual-mode", success=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("互斥规则冲突", result.stderr)
+        self.assertFalse((self.root / ".ai-rules/domains/web/clash.md").exists(), "rollback must remove skeleton")
+        m = json.loads((self.root / ".ai-rules/manifest.json").read_text(encoding="utf-8"))
+        self.assertFalse(any(r["id"] == "WEB-VISUAL-CLASH" for r in m["rules"]), "rollback must restore manifest")
+
+    def test_new_rule_disabled_is_review_candidate(self):
+        self.runcli("init")
+        self.runcli("new-rule", "--id", "CANDIDATE-RULE", "--file", "domains/cand.md",
+                    "--anchor", "services/api", "--disabled")
+        m = json.loads((self.root / ".ai-rules/manifest.json").read_text(encoding="utf-8"))
+        entry = next(r for r in m["rules"] if r["id"] == "CANDIDATE-RULE")
+        self.assertFalse(entry["enabled"])
+        self.runcli("sync", "--tools", "trae", "--apply")
+        self.assertFalse((self.root / ".trae/rules/ai-candidate-rule.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

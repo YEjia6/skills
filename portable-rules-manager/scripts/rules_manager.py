@@ -631,9 +631,83 @@ def do_harvest(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+NEW_RULE_SKELETON = """# {title}
+
+> 骨架由 portable-rules-manager new-rule 生成。按 Skill 的 references/rule-authoring.md 完成各章节（每条 MUST 必须可被客观判定违反，写清因果），删除本提示后再 sync 同步。
+
+## 适用范围
+
+- 作用域：`{anchor}`（实际匹配范围以 manifest 的 anchor/globs 为准，此处只写人读的场景说明）
+- 触发条件：<什么任务/改动场景下适用>
+
+## 规则
+
+- MUST：<不可违反的约束；写清因果，可被客观判定违反>
+- SHOULD：<默认遵守；偏离需说明理由>
+- MAY：<可选偏好>
+
+## 禁止事项
+
+- <明确边界，防止歧义执行>
+
+## 验收
+
+- <如何检查规则被遵守：审查点、命令、正反案例>
+"""
+
+
+def do_new_rule(root: Path, args: argparse.Namespace) -> int:
+    ai = root / ".ai-rules"
+    manifest_path = ai / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("缺少 .ai-rules/manifest.json；先执行 init")
+    rid = args.id
+    if not re.fullmatch(r"[A-Z][A-Z0-9-]*", rid):
+        raise ValueError("规则 ID 必须是大写字母/数字/连字符")
+    file = relpath(args.file)
+    if not file.endswith(".md"):
+        raise ValueError("规则正文必须是 .md 文件: " + file)
+    target = within(ai, file)
+    if target.exists() or target.is_symlink():
+        raise ValueError("规则正文已存在: " + file)
+    anchor = relpath(args.anchor, allow_dot=True)
+    if anchor != "." and not (root / anchor).is_dir():
+        raise ValueError(f"anchor 目录不存在: {anchor}（先创建目录，或修正作用域）")
+    cg = args.conflict_group
+    if cg and not re.fullmatch(r"[a-z0-9-]+", cg):
+        raise ValueError("conflict_group 应为空或 kebab-case")
+    m = read_json(manifest_path)
+    if any(r.get("id") == rid for r in m.get("rules", [])):
+        raise ValueError(f"规则 ID 已存在: {rid}；改进已有规则优先于新增")
+    entry = {"id": rid, "file": file, "anchor": anchor,
+             "globs": ["**/*"] if anchor == "." else [f"{anchor}/**/*"],
+             "excludes": [], "enabled": not args.disabled,
+             "description": args.description, "layer": args.layer,
+             "strength": args.strength, "conflict_group": cg}
+    original = manifest_path.read_text(encoding="utf-8")
+    m.setdefault("rules", []).append(entry)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(NEW_RULE_SKELETON.format(title=args.description or rid, anchor=anchor), encoding="utf-8")
+    manifest_path.write_text(dump_json(m), encoding="utf-8")
+    errors = validate(root, m)
+    if errors:
+        target.unlink()
+        manifest_path.write_text(original, encoding="utf-8")
+        for e in errors:
+            print("ERROR:", e, file=sys.stderr)
+        print("已回滚 new-rule 的全部改动。", file=sys.stderr)
+        return 2
+    print(f"已创建规则骨架: .ai-rules/{file}")
+    print(f"已登记 manifest: {rid} (enabled={entry['enabled']}, layer={args.layer}, strength={args.strength})")
+    print("下一步：")
+    print("  1. 按 references/rule-authoring.md 填写规则正文，删除骨架提示语")
+    print("  2. sync --tools <当前工具> 预览 → --apply 生成本工具入口")
+    print("  3. check --tools <当前工具> + explain <示例路径> 验收")
+    return 0
+
+
 def explain(root: Path, m: dict[str, Any], path: str) -> int:
     candidate = relpath(path)
-    from fnmatch import fnmatchcase
     print("匹配文件:", candidate)
     for r in m["rules"]:
         if not r["enabled"]:
@@ -655,6 +729,15 @@ def parse() -> argparse.Namespace:
     sub.add_parser("version", help="打印当前安装包版本")
     sub.add_parser("detect", help="只读探测项目内各 AI 工具的规则入口痕迹；AI 应自报身份，本命令仅供交叉验证")
     sub.add_parser("init", help="初始化 .ai-rules/ 及 JSON 清单；不会覆盖现有文件")
+    np = sub.add_parser("new-rule", help="创建新规则骨架并登记 manifest；不触发同步")
+    np.add_argument("--id", required=True, help="规则 ID：大写字母/数字/连字符，如 BACKEND-JAVA-EAM-BOOT")
+    np.add_argument("--file", required=True, help="规则正文路径，相对 .ai-rules/，如 domains/backend/xxx.md")
+    np.add_argument("--anchor", required=True, help="适用目录（相对项目根）；. 仅限 core 层全仓库底线")
+    np.add_argument("--layer", default="domain", choices=["core", "domain", "scenario", "local"])
+    np.add_argument("--strength", default="must", choices=["must", "should", "may"])
+    np.add_argument("--description", default="", help="一句话说明规则意图")
+    np.add_argument("--conflict-group", default="", help="互斥场景组（kebab-case），仅互斥规则使用")
+    np.add_argument("--disabled", action="store_true", help="登记为 enabled:false 待审候选，不参与同步")
     sp = sub.add_parser("sync", help="预览/写入多工具原生规则；默认仅预览")
     sp.add_argument("--tools", default="configured", help="configured|all|codex,cursor,claude,gemini,copilot,windsurf,trae")
     hp = sub.add_parser("harvest", help="把当前工具生成文件中的手工修改回写到 .ai-rules 源文件；默认仅预览")
@@ -687,6 +770,8 @@ def main() -> int:
         return do_detect(root)
     if args.command == "harvest":
         return do_harvest(root, args)
+    if args.command == "new-rule":
+        return do_new_rule(root, args)
     if args.command == "init":
         ai = root / ".ai-rules"
         ai.mkdir(exist_ok=True)
