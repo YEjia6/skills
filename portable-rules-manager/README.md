@@ -9,7 +9,8 @@
 - 规则源：创建 `.ai-rules/manifest.json` + `core/` / `domains/` Markdown 模板。
 - 标准化建规则：`new-rule` 生成规则骨架并登记 manifest（自动校验 ID 唯一性、anchor 存在性、互斥组重叠，失败自动回滚）；`references/rule-authoring.md` 提供编写规范（ID 命名、layer/strength、必备章节、反模式、自检清单），覆盖编程行为规则与工程流程规范。
 - 场景隔离：普通 Web UI 与图表分析 UI 按目录单独匹配；HMI 独立。
-- 多平台适配：生成 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、Cursor `.mdc`、Copilot `.instructions.md`、Trae `.trae/rules/*.md`，并支持 Windsurf/Cascade 的原生 `AGENTS.md`。
+- 多平台适配：生成 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、Cursor `.mdc`、Copilot `.instructions.md`、Trae `.trae/rules/*.md`，并支持 Windsurf/Cascade 与 DeepSeek Harness 的原生 `AGENTS.md`。
+- 规则体系生成：按 SKILL.md「规则体系生成流程」全面分析项目代码、业务流程、UI 组件与现有规范，自动产出统一 Rules 体系；`export-docs --apply` 另生成 `docs/rules/` 规则文档库（每条规则一份 + `index.md` 索引），供人与 AI 按需查阅。
 - 当前工具优先：推荐 `sync --tools <当前工具>` 只生成你正在使用的工具入口，不为闲置工具产生文件。
 - 回写闭环：`harvest --tools <当前工具>` 把生成文件里的手工改进回写到 `.ai-rules` 源，切换到其他工具时再生成。
 - 安全同步：默认预览；拒绝覆盖手工修改；备份、文件 hash 状态、静态差异检查。
@@ -98,6 +99,26 @@ python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/
 python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo explain apps/web/src/features/analytics/charts.tsx
 ```
 
+### 从零自动生成统一 Rules 体系
+
+项目还没有规则体系、或用户要求「全面分析项目并自动生成一套统一 Rules 体系」时，按 SKILL.md「规则体系生成流程」执行：只读取证（业务规则 / 功能规范 / UI 规范 / 开发规范，标注证据来源）→ 跨模块不一致先给「待确认问题」清单 → `new-rule` 逐条落地 → 同步 + 导出文档库：
+
+```bash
+# 1. 只读分析后逐条登记（推荐分类：business/、features/、ui/、domains/，跨模块底线放 core/）
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo new-rule \\
+  --id BIZ-CHECK-FLOW --file business/check-flow.md --anchor apps/web \\
+  --layer domain --strength must --description "点检/巡检/保养共用的流转与权限约束"
+
+# 2. 一次性同步到用户点名的目标工具（多工具仅限用户点名授权；典型组合 codex,trae,dsh）
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo sync --tools codex,trae,dsh --apply
+
+# 3. 生成 docs/rules/ 规则文档库并验收（状态记于 .ai-rules/.docs-state.json）
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo export-docs --apply
+python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/to/my-repo check --tools codex
+```
+
+生成的根 `AGENTS.md` 含 `rules-index` 索引表（规则/层级/强度/作用域/源文件），AI 只在改动命中某条作用域时才需要读对应源文件或 `docs/rules/` 对应文档，避免全量常驻。建议将 `docs/rules/` 提交版本库供团队与 AI 按需查阅；不想入库的项目自行加入 `.gitignore`（工具不会代写忽略规则）。
+
 在当前工具里手工改进了生成文件后，回写到 `.ai-rules` 唯一来源：
 
 ```bash
@@ -139,6 +160,9 @@ my-repo/
   .ai-rules/
     manifest.json                 # 唯一清单，务必检查并版本管理
     core/engineering.md           # 全仓库底线
+    business/check-flow.md        # 业务规则（业务流程/状态流转/排序/权限；体系生成时新增）
+    features/checkout.md          # 按模块的功能规范（体系生成时新增）
+    ui/drawer-form.md             # UI 规范（抽屉宽度/页面间距/表格/表单/按钮；体系生成时新增）
     domains/web/ui-baseline.md    # 所有 Web 页面可用性规则
     domains/web/regular-ui.md     # 仅业务界面，不要求图表遵守
     domains/web/analytics.md      # 仅图表分析场景
@@ -146,7 +170,8 @@ my-repo/
     domains/mobile/interaction.md
     domains/hmi/interaction.md
     .generated-state.json         # 已生成文件的 hash 记录
-  AGENTS.md
+    .docs-state.json              # docs/rules/ 文档库导出状态
+  AGENTS.md                       # 统一入口：core 底线 + rules-index 索引表
   CLAUDE.md
   GEMINI.md
   .cursor/rules/ai-*.mdc
@@ -158,6 +183,11 @@ my-repo/
   apps/web/src/features/business/AGENTS.md
   apps/web/src/features/analytics/AGENTS.md
   ...
+  docs/rules/                     # export-docs --apply 生成的规则文档库（按需查阅）
+    index.md
+    core/engineering.md
+    business/check-flow.md
+    ...
 ```
 
 只有在扫描确认相应目录存在、规则启用时，才会生成对应的局部文件。对于当前无法确定场景的普通 Web UI 规则，`init` 会先将其设为禁用，避免误套图表。
@@ -168,6 +198,8 @@ my-repo/
 
 > 使用 portable-rules-manager 扫描当前 Git 项目，识别前端、后端、移动端、HMI 与图表分析目录；生成或审查 `.ai-rules`，先列出规则冲突和变更预览，不要自动覆盖手工规则。获得我确认后再执行 sync --apply。
 
+> 以资深软件架构师身份全面分析当前项目（代码、业务流程、UI 组件与现有规范），按「规则体系生成流程」产出一套统一 Rules 体系（目标工具 Codex/Trae/DeepSeek Harness）；跨模块不一致的地方先给我待确认清单，不要擅自决定业务规则。
+
 ## 重要边界
 
 1. 这是 **v1 规则编译器**，主要支持目录级精确作用域。它不会把任意复杂 glob、路径排除、文件名正则完美映射到所有平台。遇到无法无歧义表达的规则时会拒绝同步。
@@ -176,12 +208,14 @@ my-repo/
 4. 各平台可能同时加载多份适用指令，应尽量避免手工与生成规则重复或互相矛盾；项目级规范不能覆盖更高优先级的系统/开发者指令。
 5. 如果项目把普通业务页面与图表放在同一目录，优先拆分为独立功能目录，再启用专项规则。不能简单写 `excludes` 期待所有工具生效。
 6. 安全硬性要求需要 CI、Lint、测试、权限、Hooks 配合，不能只靠自然语言 Rules。
+7. 根 `AGENTS.md` 的 `rules-index` 索引区与 `docs/rules/` 是托管生成内容：手改会在下次写入时被要求 `--force`；正确的修改路径是改 `.ai-rules` 源文件，再 `sync --apply` 与 `export-docs --apply`。
 
 ## 本地自测
 
 ```bash
 cd /path/to/portable-rules-manager
-python -m unittest discover -s tests -v
+# Windows GBK 控制台需要 PYTHONUTF8=1（父子进程统一 UTF-8），否则测试子进程管道会编解码错位
+PYTHONUTF8=1 python -m unittest discover -s tests -v
 ```
 
 更多 schema 字段与真实平台路径参考 `references/SCHEMA_AND_COMPATIBILITY.md`；各工具的存放位置、加载机制、探测线索、已知限制与 harvest 文件归属见 `references/tool-adapters.md`；规则编写质量标准（两类规则、必备章节、反模式、自检清单）见 `references/rule-authoring.md`。

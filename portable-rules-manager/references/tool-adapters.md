@@ -15,8 +15,9 @@
 | Gemini CLI | `gemini` | `GEMINI.md`、局部 `GEMINI.md` | `GEMINI.md`、`.gemini/` | `@./AGENTS.md` 导入，目录级层级 |
 | GitHub Copilot | `copilot` | `.github/copilot-instructions.md` + `.github/instructions/*.instructions.md` | 同上两个路径 | 仓库级常驻 + `applyTo` glob 匹配 |
 | Windsurf / Cascade | `windsurf` | `AGENTS.md`（`.windsurfrules` 为旧入口） | `.windsurf/`、`.windsurfrules` | Cascade 原生读取 `AGENTS.md` |
+| DeepSeek Harness | `dsh` | 根与子目录 `AGENTS.md` | `AGENTS.md`（弱信号，多工具共享） | agent-instructions 加载共享 agents-root `AGENTS.md` |
 
-**探测的局限**：`detect` 只检查文件痕迹。同一项目可同时存在多个工具的配置目录（例如 `.trae/` 与 `.cursor/` 并存），痕迹不能证明"当前会话"属于哪个工具。**AI 必须根据运行环境自报身份**；detect 输出仅供交叉验证。`AGENTS.md` 被 Codex/Trae/Windsurf 共享，单独出现不足以判定 Codex。
+**探测的局限**：`detect` 只检查文件痕迹。同一项目可同时存在多个工具的配置目录（例如 `.trae/` 与 `.cursor/` 并存），痕迹不能证明"当前会话"属于哪个工具。**AI 必须根据运行环境自报身份**；detect 输出仅供交叉验证。`AGENTS.md` 被 Codex/Trae/Windsurf/DeepSeek Harness 共享，单独出现不足以判定 Codex。
 
 ## Trae（`trae`）
 
@@ -69,6 +70,13 @@
 - **适配器输出**：复用共享 `AGENTS.md` 体系，**不额外生成** `.devin/rules` 或 `.windsurfrules`，避免与 AGENTS.md 重复。
 - **已知限制**：旧 `.windsurfrules` 若手写存在且与 `AGENTS.md` 内容重复，会双重加载——迁移时应删除旧文件。
 
+## DeepSeek Harness（`dsh`）
+
+- **规则存放**：根 `AGENTS.md`（共享 agents-root）+ 可选子目录 `AGENTS.md`。
+- **加载机制**：已核对至官方 commit `21d0c2e`（2026-10-05）：agent-instructions 的用户全局指令链为 `$DSH_HOME/AGENTS.md` → 共享 agents 根（`$DSH_AGENTS_HOME`，否则 `~/.agents`）的 `AGENTS.md`；项目级支持根目录与子目录 `AGENTS.md`（`AGENTS.local.md` 也是候选文件名）。后续发版仍建议复核官方仓库（见 `SCHEMA_AND_COMPATIBILITY.md` 末尾链接）。
+- **适配器输出**：复用共享 `AGENTS.md` 体系（含根 `AGENTS.md` 的 rules-index 索引表与 `<anchor>/AGENTS.md`），不另生成专属文件。
+- **已知限制**：与 Codex/Windsurf 共享同一入口文件；detect 对 `AGENTS.md` 是弱信号不判定具体工具，需 AI 自报身份交叉验证。
+
 ## harvest 回写的文件归属
 
 `harvest --tools <t>` 只收集以下路径内、且已被托管（`.generated-state.json` 有记录）的文件：
@@ -81,7 +89,8 @@
 | gemini | `GEMINI.md`、`<subdir>/GEMINI.md` |
 | copilot | `.github/copilot-instructions.md`、`.github/instructions/` |
 | windsurf | `AGENTS.md`、`<subdir>/AGENTS.md` |
+| dsh | `AGENTS.md`、`<subdir>/AGENTS.md` |
 | trae | `.trae/rules/`、`AGENTS.md`、`<subdir>/AGENTS.md` |
 
-- `AGENTS.md` 系列为多工具共享入口，codex/trae/windsurf 各自 harvest 时都在自己的收集范围内——单工具 harvest 天然只处理当前工具视角。
+- `AGENTS.md` 系列为多工具共享入口，codex/trae/windsurf/dsh 各自 harvest 时都在自己的收集范围内——单工具 harvest 天然只处理当前工具视角。
 - 单规则文件（`ai-<rule-id>.md/.mdc/.instructions.md`）整体回写；合并文件按 `<!-- rule-id: XXX -->` 锚点拆分回写；锚点之外的改动为 ORPHAN，永不自动回写。

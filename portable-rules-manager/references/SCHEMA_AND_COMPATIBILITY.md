@@ -8,7 +8,7 @@
 {
   "schema_version": 1,
   "project": {"name": "example"},
-  "targets": ["codex", "cursor", "claude", "gemini", "copilot", "windsurf", "trae"],
+  "targets": ["codex", "cursor", "claude", "gemini", "copilot", "windsurf", "trae", "dsh"],
   "rules": [
     {
       "id": "CORE-ENGINEERING",
@@ -58,6 +58,9 @@
 | GitHub Copilot | `.github/copilot-instructions.md` 与 `.github/instructions/ai-*.instructions.md` | `applyTo` 路径匹配，具体客户端能力有差异 |
 | Windsurf / Cascade | 根目录和子目录 `AGENTS.md` | 当前文档中是原生自动识别方式；为减少重复，默认不另写 `.devin/rules` |
 | Trae | 根 `AGENTS.md`（承载 core）与 `.trae/rules/ai-*.md`（仅 domain 规则） | Trae 同时加载两者；core 只放 `AGENTS.md`，避免同一会话重复加载 |
+| DeepSeek Harness | 根 `AGENTS.md`（含 rules-index 索引区）与子目录 `AGENTS.md` | 复用共享 agents-root 入口，不另生成专属文件 |
+
+**规则文档库**：`export-docs --apply` 另将每条启用规则导出为 `docs/rules/<规则源文件相对路径>`（附 `rule-id/layer/strength/anchor/globs` 元信息），并生成 `docs/rules/index.md` 索引，供人与 AI 按需查阅；该目录不属于任何工具入口，由 `.ai-rules/.docs-state.json` 托管。入库策略：建议将 `docs/rules/` 提交版本库；不想入库的项目自行加入 `.gitignore`，工具不会代写忽略规则。
 
 **重要**：同一仓库同时生成多个适配器时，个别工具可能既发现 `AGENTS.md` 也发现自己的规则文件，造成同一条约束在上下文出现两次。由于同一仓库面向多工具，这个权衡目前无法完全自动化消除。建议实际使用中按工具执行 `sync --tools ...`，并核实激活来源。各工具的存放位置、加载机制、探测线索与已知限制详见 `references/tool-adapters.md`。
 
@@ -72,7 +75,8 @@
 - `scan` 与 `detect` 为只读；`init` 仅新增不存在的源文件和清单；`sync` 默认只输出预览。
 - `sync --apply` 拒绝覆盖未托管或已经被手工修改的文件。`sync --apply --force` 先备份再覆盖。符号链接从不强制覆盖。
 - `--prune` 才会移除状态记录里已不再生成的旧目标，并备份。不存在状态记录的用户文件不会被 `--prune` 清理。
-- `harvest --tools <单个工具>` 默认预览；`--apply` 把漂移的规则块回写到 `.ai-rules` 源文件，备份后重渲染当前工具全部生成文件。ORPHAN（rule-id 锚点之外的改动）与 UNKNOWN-RULE 永不自动回写。
+- `harvest --tools <单个工具>` 默认预览；`--apply` 把漂移的规则块回写到 `.ai-rules` 源文件，备份后重渲染当前工具全部生成文件。ORPHAN（rule-id 锚点之外的改动）与 UNKNOWN-RULE 永不自动回写。规则索引区落后于清单时提示 INDEX-DIFF（不算手改），重新 `sync --tools <工具> --apply` 即可刷新。
+- 根 `AGENTS.md` 的 `<!-- rules-index:begin/end -->` 索引区由 `sync` 自动维护；`export-docs --apply` 维护 `docs/rules/`。两者的手改都会在下次写入时被要求 `--force`。
 - `check` 验证当前生成文件与预期文本一致，但**不验证模型行为**。
 - 所有修改都发生在明确指定的项目根目录，不写入操作系统级 AI 配置文件。
 
@@ -85,3 +89,4 @@
 - Gemini CLI: https://geminicli.com/docs/cli/gemini-md/
 - GitHub Copilot: https://docs.github.com/en/copilot/how-tos/copilot-in-your-ide/customize-copilot/configure-custom-instructions/add-repository-instructions-in-your-ide
 - Windsurf / Cascade: https://docs.devin.ai/desktop/cascade/memories
+- DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness （`packages/context/agent-instructions`；已核对 commit `21d0c2e` 2026-10-05：用户全局指令链为 `$DSH_HOME/AGENTS.md` → 共享 agents 根 `$DSH_AGENTS_HOME`/`~/.agents` 的 `AGENTS.md`，项目级加载根与子目录 `AGENTS.md` 及 `AGENTS.local.md`；后续发版仍建议复核）

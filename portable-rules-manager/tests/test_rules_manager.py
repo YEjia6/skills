@@ -1,5 +1,6 @@
 """Tests for the packaged CLI. Run: python -m unittest discover -s tests -v"""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -31,7 +32,9 @@ class CLI(unittest.TestCase):
         self.tmp.cleanup()
 
     def runcli(self, *args, success=True):
-        r = subprocess.run([sys.executable, str(SCRIPT), "--project", str(self.root), *args], capture_output=True, text=True)
+        # 强制父子进程均用 UTF-8，避免 Windows GBK 控制台下的解码错误。
+        env = dict(os.environ, PYTHONUTF8="1")
+        r = subprocess.run([sys.executable, str(SCRIPT), "--project", str(self.root), *args], capture_output=True, text=True, encoding="utf-8", env=env)
         if success and r.returncode:
             self.fail(f"{r.returncode}: {r.stdout}\n{r.stderr}")
         return r
@@ -121,10 +124,26 @@ class CLI(unittest.TestCase):
         self.runcli("init")
         outside = self.root / "user-owned.txt"
         outside.write_text("Do not modify", encoding="utf-8")
-        (self.root / "AGENTS.md").symlink_to(outside)
-        result = self.runcli("sync", "--apply", "--force", success=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(outside.read_text(encoding="utf-8"), "Do not modify")
+        try:
+            (self.root / "AGENTS.md").symlink_to(outside)
+            result = self.runcli("sync", "--apply", "--force", success=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "Do not modify")
+        except OSError:
+            # 无符号链接特权（Windows 常规账户）时，改测目录联接（junction）逃逸防线：
+            # .ai-rules 指向仓库外时，任何非 scan 命令都必须拒绝。
+            if os.name != "nt":
+                raise
+            import shutil
+            import _winapi
+            outside_dir = self.root.parent / "ai-rules-elsewhere"
+            outside_dir.mkdir(exist_ok=True)
+            shutil.rmtree(self.root / ".ai-rules")
+            _winapi.CreateJunction(str(outside_dir), str(self.root / ".ai-rules"))
+            result = self.runcli("sync", "--tools", "codex", success=False)
+            self.assertEqual(result.returncode, 3)
+            self.assertIn("安全限制", result.stderr)
+            self.assertEqual(list(outside_dir.iterdir()), [])
 
     def test_conflicting_visual_scopes_are_rejected(self):
         self.runcli("init")
@@ -281,6 +300,74 @@ class CLI(unittest.TestCase):
         self.assertFalse(entry["enabled"])
         self.runcli("sync", "--tools", "trae", "--apply")
         self.assertFalse((self.root / ".trae/rules/ai-candidate-rule.md").exists())
+
+    def test_dsh_uses_shared_agents_entry(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "dsh", "--apply")
+        self.assertTrue((self.root / "AGENTS.md").exists())
+        self.assertFalse((self.root / ".trae").exists())
+        self.assertFalse((self.root / ".cursor").exists())
+        self.assertFalse((self.root / "CLAUDE.md").exists())
+        agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("rules-index:begin", agents)
+        self.assertIn("| CORE-ENGINEERING |", agents)
+        self.assertIn("全仓库工程底线", agents)
+        self.assertEqual(self.runcli("check", "--tools", "dsh").returncode, 0)
+
+    def test_harvest_dsh_roundtrip(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "dsh", "--apply")
+        agents = self.root / "AGENTS.md"
+        text = agents.read_text(encoding="utf-8")
+        text = text.replace("基于已查看的文件与实际执行结果回答", "DSH 手改后的工程底线", 1)
+        agents.write_text(text, encoding="utf-8")
+        preview = self.runcli("harvest", "--tools", "dsh").stdout
+        self.assertIn("HARVEST", preview)
+        self.assertIn("CORE-ENGINEERING", preview)
+        self.runcli("harvest", "--tools", "dsh", "--apply")
+        self.assertIn("DSH 手改后的工程底线", (self.root / ".ai-rules/core/engineering.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.runcli("check", "--tools", "dsh").returncode, 0)
+
+    def test_harvest_index_drift_is_not_orphan(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "codex", "--apply")
+        path = self.root / ".ai-rules/manifest.json"
+        m = json.loads(path.read_text(encoding="utf-8"))
+        next(r for r in m["rules"] if r["id"] == "CORE-ENGINEERING")["description"] = "改名后的底线"
+        path.write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+        preview = self.runcli("harvest", "--tools", "codex").stdout
+        self.assertNotIn("ORPHAN", preview)
+        self.assertIn("INDEX-DIFF", preview)
+
+    def test_export_docs_creates_library_and_refuses_hand_edits(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "trae", "--apply")
+        self.runcli("export-docs", "--apply")
+        index = (self.root / "docs/rules/index.md").read_text(encoding="utf-8")
+        self.assertIn("规则文档索引", index)
+        self.assertIn("CORE-ENGINEERING", index)
+        doc = self.root / "docs/rules/core/engineering.md"
+        self.assertIn("rule-id: CORE-ENGINEERING", doc.read_text(encoding="utf-8"))
+        # docs 导出使用独立状态文件，不影响工具入口的校验
+        self.assertEqual(self.runcli("check", "--tools", "trae").returncode, 0)
+        with doc.open("a", encoding="utf-8") as f:
+            f.write("手改\n")
+        result = self.runcli("export-docs", "--apply", success=False)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("手改", result.stderr)
+        result = self.runcli("export-docs", "--apply", "--force")
+        self.assertIn("已导出", result.stdout)
+        backups = list((self.root / ".ai-rules/backups").rglob("engineering.md"))
+        self.assertTrue(backups)
+
+    def test_export_docs_skips_disabled(self):
+        self.runcli("init")
+        self.runcli("new-rule", "--id", "CANDIDATE-DOC", "--file", "domains/cand-doc.md",
+                    "--anchor", "services/api", "--disabled")
+        self.runcli("export-docs", "--apply")
+        self.assertFalse((self.root / "docs/rules/domains/cand-doc.md").exists())
+        index = (self.root / "docs/rules/index.md").read_text(encoding="utf-8")
+        self.assertNotIn("CANDIDATE-DOC", index)
 
 
 if __name__ == "__main__":
