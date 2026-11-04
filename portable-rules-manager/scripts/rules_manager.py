@@ -220,7 +220,18 @@ def new_manifest(root: Path, report: dict[str, Any]) -> dict[str, Any]:
     return {"schema_version": 1, "project": {"name": root.name, "scan": report}, "targets": list(TOOLS), "rules": rules}
 
 
-def validate(root: Path, manifest: dict[str, Any]) -> list[str]:
+def body_readiness_errors(body: str) -> list[str]:
+    """仅拦截确定的空正文和本工具骨架，不推断规则语义质量。"""
+    if not body.strip():
+        return ["规则正文为空"]
+    markers = ["骨架由 portable-rules-manager new-rule 生成。"]
+    markers.extend(re.findall(r"<[^<>\n]+>", NEW_RULE_SKELETON))
+    if any(marker in body for marker in markers):
+        return ["规则骨架尚未填写完成；请替换占位内容并删除骨架提示，或设置 enabled:false 暂缓发布"]
+    return []
+
+
+def validate(root: Path, manifest: dict[str, Any], *, publishing: bool = False) -> list[str]:
     errors = []
     if manifest.get("schema_version") != 1:
         errors.append("schema_version 目前必须为 1")
@@ -251,6 +262,8 @@ def validate(root: Path, manifest: dict[str, Any]) -> list[str]:
                 safe_glob(e)
             if not isinstance(r.get("enabled"), bool):
                 raise ValueError("enabled 必须是 true/false")
+            if publishing and r["enabled"]:
+                errors.extend(f"{rid}: {message}" for message in body_readiness_errors(rule_path.read_text(encoding="utf-8")))
             if r.get("layer", "domain") not in ("core", "domain", "scenario", "local"):
                 raise ValueError("layer 必须是 core/domain/scenario/local")
             if r.get("strength", "must") not in ("must", "should", "may"):
@@ -433,7 +446,7 @@ def do_sync(root: Path, args: argparse.Namespace, *, check: bool = False) -> int
     if not manifest_path.is_file():
         raise ValueError("先执行 init，或在 .ai-rules/manifest.json 中定义规则")
     m = read_json(manifest_path)
-    errors = validate(root, m)
+    errors = validate(root, m, publishing=True)
     if errors:
         for e in errors:
             print("ERROR:", e, file=sys.stderr)
@@ -598,7 +611,7 @@ def do_harvest(root: Path, args: argparse.Namespace) -> int:
     if not manifest_path.is_file():
         raise ValueError("缺少 .ai-rules/manifest.json；先 init 并 sync")
     m = read_json(manifest_path)
-    errors = validate(root, m)
+    errors = validate(root, m, publishing=True)
     if errors:
         for e in errors:
             print("ERROR:", e, file=sys.stderr)
@@ -659,6 +672,12 @@ def do_harvest(root: Path, args: argparse.Namespace) -> int:
         print(f"{status:14} {rid or '-':35} {path}")
     harvests = [a for a in actions if a[0] == "HARVEST"]
     skipped = [a for a in actions if a[0] in ("ORPHAN", "UNKNOWN-RULE")]
+    errors = [f"{rid}: {message}" for _, rid, _, body in harvests
+              for message in body_readiness_errors(body or "")]
+    if errors:
+        for message in errors:
+            print(message, file=sys.stderr)
+        return 2
     if not args.apply:
         print("预览完成：没有写入文件。添加 --apply 才回写到 .ai-rules 源文件。")
         return 0
@@ -728,7 +747,7 @@ def do_export_docs(root: Path, args: argparse.Namespace) -> int:
     if not manifest_path.is_file():
         raise ValueError("先执行 init，或在 .ai-rules/manifest.json 中定义规则")
     m = read_json(manifest_path)
-    errors = validate(root, m)
+    errors = validate(root, m, publishing=True)
     if errors:
         for e in errors:
             print("ERROR:", e, file=sys.stderr)

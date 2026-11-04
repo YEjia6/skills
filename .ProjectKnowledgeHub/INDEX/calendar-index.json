@@ -4,5 +4,11 @@
     "plm": "PLM-20261031-01",
     "calendar": "CAL-20261031-01",
     "path": "Calendar/20261031/entries/CAL-20261031-01.md"
+  },
+  {
+    "requirement": "REQ-20261104-01",
+    "plm": "PLM-20261104-01",
+    "calendar": "CAL-20261104-01",
+    "path": "Calendar/20261104/entries/CAL-20261104-01.md"
   }
 ]

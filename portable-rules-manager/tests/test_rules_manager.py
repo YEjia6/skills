@@ -256,9 +256,48 @@ class CLI(unittest.TestCase):
         self.assertEqual(entry["excludes"], [])
         self.assertTrue(entry["enabled"])
         self.assertEqual(entry["layer"], "domain")
+        rejected = self.runcli("sync", "--tools", "trae", "--apply", success=False)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertFalse((self.root / ".trae").exists())
+        (self.root / ".ai-rules/domains/backend/custom-api.md").write_text(
+            "# 接口兼容性\n\n- MUST：变更响应字段时运行已有契约测试，防止调用方解析失败。\n",
+            encoding="utf-8")
         self.runcli("sync", "--tools", "trae", "--apply")
         self.assertTrue((self.root / ".trae/rules/ai-backend-custom-api.md").exists())
         self.assertIn("BACKEND-CUSTOM-API", self.runcli("explain", "services/api/handler.py").stdout)
+
+    def test_incomplete_publication_preserves_all_files(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "codex", "--apply")
+        self.runcli("export-docs", "--apply")
+        source = self.root / ".ai-rules/core/engineering.md"
+        for body in ("  \n", "# 约束\n- MUST：<不可违反的约束；写清因果，可被客观判定违反>\n"):
+            source.write_text(body, encoding="utf-8")
+            before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+            for args in (("sync", "--tools", "codex"), ("sync", "--tools", "codex", "--apply", "--force"),
+                         ("check", "--tools", "codex"), ("export-docs",), ("export-docs", "--apply", "--force"),
+                         ("harvest", "--tools", "codex", "--apply")):
+                with self.subTest(body=body, args=args):
+                    self.assertEqual(self.runcli(*args, success=False).returncode, 2)
+                    after = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+                    self.assertEqual(before, after)
+
+    def test_harvest_rejects_incomplete_edit_without_writes(self):
+        self.runcli("init")
+        self.runcli("sync", "--tools", "trae", "--apply")
+        target = next((self.root / ".trae/rules").glob("ai-backend-*.md"))
+        target.write_text(target.read_text(encoding="utf-8") + "\n- <明确边界，防止歧义执行>\n", encoding="utf-8")
+        before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        for extra in ((), ("--apply",)):
+            self.assertEqual(self.runcli("harvest", "--tools", "trae", *extra, success=False).returncode, 2)
+            self.assertEqual(before, {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+
+    def test_valid_rule_can_contain_generic_placeholders_and_html(self):
+        self.runcli("init")
+        source = self.root / ".ai-rules/core/engineering.md"
+        source.write_text("# 模板约定\n- MUST：模板保留 <客户名称> 参数；界面使用 <button> 标签。\n", encoding="utf-8")
+        self.runcli("sync", "--tools", "codex", "--apply")
+        self.runcli("check", "--tools", "codex")
 
     def test_new_rule_requires_init(self):
         result = self.runcli("new-rule", "--id", "X-ONE", "--file", "domains/x.md", "--anchor", ".", success=False)
