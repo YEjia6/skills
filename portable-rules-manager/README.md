@@ -10,7 +10,7 @@
 - 标准化建规则：`new-rule` 生成规则骨架并登记 manifest（自动校验 ID 唯一性、anchor 存在性、互斥组重叠，失败自动回滚）；`references/rule-authoring.md` 提供编写规范（ID 命名、layer/strength、必备章节、反模式、自检清单），覆盖编程行为规则与工程流程规范。
 - 场景隔离：普通 Web UI 与图表分析 UI 按目录单独匹配；HMI 独立。
 - 多平台适配：生成 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、Cursor `.mdc`、Copilot `.instructions.md`、Trae `.trae/rules/*.md`，并支持 Windsurf/Cascade 与 DeepSeek Harness 的原生 `AGENTS.md`。
-- 规则体系生成：按 SKILL.md「规则体系生成流程」与分析原则（以项目实际情况为依据、区分证据状态、区分 BR/FR/TR 三类规则）全面分析项目，自动产出统一 Rules 体系；`export-docs --apply` 另生成 `docs/rules/` 规则文档库（每条规则一份 + `index.md` 索引），供人与 AI 按需查阅。
+- 规则体系生成：按 SKILL.md「规则体系生成流程」与分析原则及分析任务（三个分析任务推进；以项目实际情况为依据、区分证据状态、区分 BR/FR/TR 三类规则）全面分析项目，自动产出统一 Rules 体系；`export-docs --apply` 另生成 `docs/rules/` 规则文档库（每条规则一份 + `index.md` 索引），供人与 AI 按需查阅。
 - 当前工具优先：推荐 `sync --tools <当前工具>` 只生成你正在使用的工具入口，不为闲置工具产生文件。
 - 回写闭环：`harvest --tools <当前工具>` 把生成文件里的手工改进回写到 `.ai-rules` 源，切换到其他工具时再生成。
 - 安全同步：默认预览；拒绝覆盖手工修改；备份、文件 hash 状态、静态差异检查。
@@ -20,7 +20,7 @@
 
 ### 执行可靠性与升级提示
 
-1.5.0 保持现有清单与命令格式。发布、导出、检查和回写会拒绝已启用的空正文及本工具未完成骨架；先填写正文并删除骨架提示，或设为 `enabled:false` 待审。`--force` 不能绕过该检查。`new-rule` 生成的骨架自本版起新增「证据状态」占位行（依据 [分析原则](references/analysis-principles.md) 原则 2），旧骨架无需迁移，仍按原格式填写即可。
+1.6.0 保持现有清单与命令格式。发布、导出、检查和回写会拒绝已启用的空正文及本工具未完成骨架；先填写正文并删除骨架提示，或设为 `enabled:false` 待审。`--force` 不能绕过该检查。`new-rule` 生成的骨架自 1.5.0 起新增「证据状态」占位行（依据 [分析原则](references/analysis-principles.md) 原则 2），旧骨架无需迁移，仍按原格式填写即可。
 
 该检查不判定规则是否合理，也不证明模型遵守。规则准入、精简、作用域正反例与反馈退役流程见 [执行可靠性](references/execution-reliability.md)。功能意图、探索方案和一次性界面设计保留在需求/规格中，避免转成长期工程约束。规则文档库按交付需求导出，不强制每个项目生成。
 
@@ -109,7 +109,7 @@ python /path/to/portable-rules-manager/scripts/rules_manager.py --project /path/
 
 ### 从零自动生成统一 Rules 体系
 
-项目还没有规则体系、或用户要求「全面分析项目并自动生成一套统一 Rules 体系」时，按 SKILL.md「规则体系生成流程」与 [分析原则](references/analysis-principles.md) 执行：只读取证（以项目实际情况为依据追踪调用链；输出业务规则 BR / 功能规则 FR / 技术实现规则 TR，标注证据状态：已验证 / 已记录但未验证 / 合理推断 / 待确认 / 建议新增）→ 跨模块不一致先给「待确认问题」清单 → `new-rule` 逐条落地 → 同步 + 导出文档库：
+项目还没有规则体系、或用户要求「全面分析项目并自动生成一套统一 Rules 体系」时，按 SKILL.md「规则体系生成流程」与 [分析原则](references/analysis-principles.md)（三条原则 + 三个分析任务）执行：只读取证（任务一全面梳理项目架构输出系统模块清单，禁止仅阅读局部代码就输出文档；任务二提炼业务规则 BR、任务三提炼功能规则 FR，TR 从架构技术事实单独沉淀；每条标注证据状态：已验证 / 已记录但未验证 / 合理推断 / 待确认 / 建议新增）→ 跨模块不一致先给「待确认问题」清单 → `new-rule` 逐条落地 → 同步 + 导出文档库：
 
 ```bash
 # 1. 只读分析后逐条登记（推荐分类：business/、features/、ui/、domains/，跨模块底线放 core/）
