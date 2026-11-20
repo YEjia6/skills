@@ -791,6 +791,7 @@ NEW_RULE_SKELETON = """# {title}
 
 - 作用域：`{anchor}`（实际匹配范围以 manifest 的 anchor/globs 为准，此处只写人读的场景说明）
 - 触发条件：<什么任务/改动场景下适用>
+- 证据状态：<已验证 / 已记录但未验证 / 合理推断 / 待确认 / 建议新增>；证据：<调用链、表结构、接口、测试或文档依据>（判定标准见 Skill 的 references/analysis-principles.md 原则 2）
 
 ## 规则
 
@@ -852,7 +853,7 @@ def do_new_rule(root: Path, args: argparse.Namespace) -> int:
     print(f"已创建规则骨架: .ai-rules/{file}")
     print(f"已登记 manifest: {rid} (enabled={entry['enabled']}, layer={args.layer}, strength={args.strength})")
     print("下一步：")
-    print("  1. 按 references/rule-authoring.md 填写规则正文，删除骨架提示语")
+    print("  1. 按 references/rule-authoring.md 填写规则正文，删除骨架提示语；业务含义先读 references/analysis-principles.md（分类 BR/FR/TR、标注证据状态，未验证内容保持 enabled:false）")
     print("  2. sync --tools <当前工具> 预览 → --apply 生成本工具入口")
     print("  3. check --tools <当前工具> + explain <示例路径> 验收")
     return 0
