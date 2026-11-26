@@ -1,0 +1,28 @@
+# 点位配置生成 项目配置文件（本技能约定的 YAML 子集：键/嵌套列表/行内数组，不支持锚点等高级语法）
+# db: 段为预留 —— 技能后续集成进项目后，可直查 factory_module / equipment_plc 等真源表，
+#     届时 factory_module_id 可改为自动解析，无需人工维护。
+project: 山东258
+exporter: 金旺智能
+
+# 产线列表: name=产线名(Excel「产线」列)  factory_module_id=factory_module 表主键
+#           device_prefixes=按设备编号前缀归线
+lines:
+  - name: 灌装线
+    factory_module_id: "2111295160195661825"
+    device_prefixes: ["M1601", "M1613"]
+
+defaults:
+  port: "502"          # 设备名称/IP 未写端口时的默认端口
+
+# 整机展示设备: 这些设备的全部纳入点位 采集分类=show
+# （库真源: M160102 灌装机整表 show; M160103/106/108 同族生产单机从之。
+#  M160116 瓶检重秤是检测设备——时间类 pointclass=NULL，其 show(状态/产量/产能)由词表行给出，勿加入本列表）
+show_all_eqp: ["M160102", "M160103", "M160106", "M160108"]
+
+# 端口 → 采集层 plc_type 映射（仅 --with-collection 时使用）
+plc_type_by_port:
+  "102": "S7"
+  "502": "MODBUSTCP"
+  "503": "MODBUSTCP"
+
+db: {}
